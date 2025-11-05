@@ -145,8 +145,6 @@ const nodeElements = reactive({});
 const domainElements = reactive({});
 const edgeElements = reactive({});
 
-const getSvgRoot = () => canvas.value?.graphRef?.value?.querySelector('svg');
-
 const nodeActions = computed(() => [
   { key: 'edit', label: '编辑', icon: NodeIndexOutlined },
   { key: 'move', label: '移至域', icon: ExportOutlined },
@@ -184,7 +182,6 @@ const handleAddNode = (type) => {
 
 const handleSave = async () => {
   const payload = serialize();
-  console.info('[Mermaid Flow Architect] 保存payload示例', payload);
   try {
     await fetch('/api/graphs', {
       method: 'POST',
@@ -257,7 +254,6 @@ const multiActionsMap = {
 
 const onMultiAction = (key) => {
   multiActionsMap[key]?.();
-  multiSelection.value = [];
   resetToolbars();
 };
 
@@ -295,7 +291,6 @@ const confirmMoveNodes = () => {
   }
   moveNodesToDomain(moveNodesModal.ids, targetDomain ?? null);
   moveNodesModal.open = false;
-  nextTick(updateSelectionPositions);
 };
 
 const openEditDomain = (id) => {
@@ -339,98 +334,47 @@ const deleteDomain = (id) => {
 };
 
 const attachNodeHandlers = () => {
-  const svg = getSvgRoot();
+  if (!canvas.value?.graphRef?.value) return;
   nodeElementsClear();
+  const svg = canvas.value.graphRef.value.querySelector('svg');
   if (!svg) return;
-
   state.nodes.forEach((node) => {
-    const labelEl = svg.querySelector(`[data-node-id="${node.id}"]`);
-    if (!labelEl) return;
-    nodeElements[node.id] = labelEl.getBoundingClientRect();
-    const group = labelEl.closest('g.node');
-    if (group) {
-      group.dataset.nodeId = node.id;
-      group.style.cursor = 'pointer';
-    }
-    if (!labelEl.dataset.boundNode) {
-      labelEl.dataset.boundNode = 'true';
-      labelEl.addEventListener('click', (event) => onNodeClick(event, node));
-      labelEl.addEventListener('dblclick', (event) => {
-        event.stopPropagation();
-        openEditNode(node.id);
-      });
-      labelEl.addEventListener('pointerdown', (event) => {
-        event.stopPropagation();
-        onLinkStart(event, { type: 'node', id: node.id });
-      });
+    const element = svg.querySelector(`#node_${node.id}`);
+    if (element) {
+      nodeElements[node.id] = element.getBoundingClientRect();
+      element.onclick = (event) => onNodeClick(event, node);
+      element.ondblclick = () => openEditNode(node.id);
+      element.onpointerdown = (event) => onLinkStart(event, { type: 'node', id: node.id });
     }
   });
 
   state.domains.forEach((domain) => {
-    const cluster = svg.querySelector(`#cluster_domain_${domain.id}`);
-    if (cluster) {
-      const rectEl = cluster.querySelector('rect');
-      const targetEl = rectEl || cluster;
-      domainElements[domain.id] = targetEl.getBoundingClientRect();
-      targetEl.style.cursor = 'pointer';
-      if (!targetEl.dataset.boundDomain) {
-        targetEl.dataset.boundDomain = 'true';
-        targetEl.addEventListener('click', (event) => onDomainClick(event, domain));
-        targetEl.addEventListener('pointerdown', (event) => {
-          event.stopPropagation();
-          onLinkStart(event, { type: 'domain', id: domain.id });
-        });
-      }
-    }
-    const labelEl = svg.querySelector(`[data-domain-id="${domain.id}"]`);
-    if (labelEl && !labelEl.dataset.boundDomainLabel) {
-      labelEl.dataset.boundDomainLabel = 'true';
-      labelEl.addEventListener('click', (event) => onDomainClick(event, domain));
-      labelEl.addEventListener('dblclick', (event) => {
-        event.stopPropagation();
-        openEditDomain(domain.id);
-      });
-      labelEl.addEventListener('pointerdown', (event) => {
-        event.stopPropagation();
-        onLinkStart(event, { type: 'domain', id: domain.id });
-      });
+    const element = svg.querySelector(`#domain_anchor_${domain.id}`);
+    if (element) {
+      domainElements[domain.id] = element.getBoundingClientRect();
+      element.onclick = (event) => onDomainClick(event, domain);
+      element.ondblclick = () => openEditDomain(domain.id);
+      element.onpointerdown = (event) => onLinkStart(event, { type: 'domain', id: domain.id });
     }
   });
 
-  const edgeGroups = svg.querySelectorAll('g.edgePaths > g.edgePath');
-  edgeGroups.forEach((group, index) => {
-    const edge = state.edges[index];
+  svg.querySelectorAll('span[data-edge-id]').forEach((span) => {
+    const edgeId = span.getAttribute('data-edge-id');
+    if (!edgeId) return;
+    const edge = state.edges.find((item) => item.id === edgeId);
     if (!edge) return;
-    group.dataset.edgeId = edge.id;
-    edgeElements[edge.id] = group.getBoundingClientRect();
-    const path = group.querySelector('path');
-    const target = path || group;
-    target.style.cursor = 'pointer';
-    if (!target.dataset.boundEdge) {
-      target.dataset.boundEdge = 'true';
-      target.addEventListener('click', (event) => onEdgeClick(event, edge));
+    const edgeNode = span.closest('g.edgePath');
+    if (edgeNode) {
+      edgeElements[edgeId] = edgeNode.getBoundingClientRect();
+      edgeNode.onclick = (event) => onEdgeClick(event, edge);
     }
   });
-
-  applySelectionStyles();
 };
 
 const nodeElementsClear = () => {
   Object.keys(nodeElements).forEach((key) => delete nodeElements[key]);
   Object.keys(domainElements).forEach((key) => delete domainElements[key]);
   Object.keys(edgeElements).forEach((key) => delete edgeElements[key]);
-};
-
-const applySelectionStyles = () => {
-  const svg = getSvgRoot();
-  if (!svg) return;
-  svg.querySelectorAll('g.node.selected').forEach((group) => group.classList.remove('selected'));
-  multiSelection.value.forEach((id) => {
-    const group = svg.querySelector(`#node_${id}`);
-    if (group) {
-      group.classList.add('selected');
-    }
-  });
 };
 
 const onRendered = async () => {
@@ -440,23 +384,8 @@ const onRendered = async () => {
   updateSelectionPositions();
 };
 
-const shouldSkipClick = () => {
-  if (suppressClick) {
-    suppressClick = false;
-    if (suppressClickTimeout) {
-      window.clearTimeout(suppressClickTimeout);
-      suppressClickTimeout = null;
-    }
-    return true;
-  }
-  return false;
-};
-
 const onNodeClick = (event, node) => {
   event.stopPropagation();
-  if (shouldSkipClick()) {
-    return;
-  }
   resetToolbars();
   const rect = event.currentTarget.getBoundingClientRect();
   showNodeToolbar(node.id, rect);
@@ -464,9 +393,6 @@ const onNodeClick = (event, node) => {
 
 const onDomainClick = (event, domain) => {
   event.stopPropagation();
-  if (shouldSkipClick()) {
-    return;
-  }
   resetToolbars();
   const rect = event.currentTarget.getBoundingClientRect();
   showDomainToolbar(domain.id, rect);
@@ -508,11 +434,7 @@ const showMultiToolbar = (ids, rect) => {
 };
 
 const onCanvasPointerDown = (event) => {
-  if (
-    event.target.closest('[data-node-id]') ||
-    event.target.closest('[data-domain-id]') ||
-    event.target.closest('g.node, g.cluster, g.edgePath')
-  ) {
+  if (event.target.closest('g.node, g.cluster, g.edgePath')) {
     return;
   }
   pointerState.isSelecting = true;
@@ -573,7 +495,6 @@ const updateSelection = () => {
     }
   });
   multiSelection.value = selected;
-  applySelectionStyles();
 };
 
 const rectInsideSelection = (rect, selection) => {
@@ -621,35 +542,21 @@ const computeBoundingRect = (rects) => {
 };
 
 const updateSelectionPositions = () => {
-  const svg = getSvgRoot();
-  if (!svg) return;
   Object.keys(nodeElements).forEach((key) => {
-    const element = svg.querySelector(`[data-node-id="${key}"]`);
+    const element = canvas.value?.graphRef?.value?.querySelector(`#node_${key}`);
     if (element) {
       nodeElements[key] = element.getBoundingClientRect();
     }
   });
   Object.keys(domainElements).forEach((key) => {
-    const clusterRect = svg.querySelector(`#cluster_domain_${key} rect`);
-    const clusterGroup = svg.querySelector(`#cluster_domain_${key}`);
-    const targetEl = clusterRect || clusterGroup;
-    if (targetEl) {
-      domainElements[key] = targetEl.getBoundingClientRect();
+    const element = canvas.value?.graphRef?.value?.querySelector(`#domain_anchor_${key}`);
+    if (element) {
+      domainElements[key] = element.getBoundingClientRect();
     }
   });
-  Object.keys(edgeElements).forEach((key) => {
-    const group = svg.querySelector(`g.edgePaths > g.edgePath[data-edge-id=\"${key}\"]`);
-    if (group) {
-      edgeElements[key] = group.getBoundingClientRect();
-    }
-  });
-  applySelectionStyles();
 };
 
 let linkTimer = null;
-let cancelLinkListener = null;
-let suppressClick = false;
-let suppressClickTimeout = null;
 const linkSource = ref(null);
 
 const onLinkStart = (event, source) => {
@@ -658,15 +565,6 @@ const onLinkStart = (event, source) => {
   const rect = getCanvasRect();
   const startPoint = { x: event.clientX - rect.left, y: event.clientY - rect.top };
   linkTimer = window.setTimeout(() => {
-    suppressClick = true;
-    if (suppressClickTimeout) {
-      window.clearTimeout(suppressClickTimeout);
-      suppressClickTimeout = null;
-    }
-    if (cancelLinkListener) {
-      window.removeEventListener('pointerup', cancelLinkListener);
-      cancelLinkListener = null;
-    }
     linkOverlay.active = true;
     linkOverlay.start = startPoint;
     linkOverlay.end = startPoint;
@@ -674,11 +572,7 @@ const onLinkStart = (event, source) => {
     window.addEventListener('pointermove', onLinkMove);
     window.addEventListener('pointerup', onLinkEnd);
   }, 500);
-  cancelLinkListener = () => {
-    cancelLinkTimer();
-    cancelLinkListener = null;
-  };
-  window.addEventListener('pointerup', cancelLinkListener, { once: true });
+  window.addEventListener('pointerup', cancelLinkTimer, { once: true });
 };
 
 const cancelLinkTimer = () => {
@@ -702,10 +596,6 @@ const onLinkEnd = (event) => {
     ensureEdge(linkSource.value, target);
   }
   linkSource.value = null;
-  suppressClickTimeout = window.setTimeout(() => {
-    suppressClick = false;
-    suppressClickTimeout = null;
-  }, 200);
 };
 
 const getCanvasRect = () => {
@@ -730,12 +620,6 @@ const pointInRect = (x, y, rect) => {
   if (!rect) return false;
   return x >= rect.left && x <= rect.left + rect.width && y >= rect.top && y <= rect.top + rect.height;
 };
-
-watch(
-  multiSelection,
-  () => nextTick(applySelectionStyles),
-  { deep: true }
-);
 
 watch(
   () => state.nodes.length,
@@ -771,39 +655,5 @@ onBeforeUnmount(() => {
 
 :global(svg span[data-edge-id]) {
   display: none;
-}
-
-:global(.node-label),
-:global(.domain-label) {
-  pointer-events: all;
-  cursor: pointer;
-}
-
-:global(.domain-label) {
-  font-weight: 600;
-}
-
-:global(g.node.selected rect) {
-  stroke: #38bdf8 !important;
-  stroke-width: 4px !important;
-}
-
-:global(g.edgePath path) {
-  pointer-events: stroke;
-  stroke-width: 2.5px;
-}
-
-:global(g.edgePath path:hover) {
-  stroke: #38bdf8;
-}
-
-:global(g.cluster rect) {
-  cursor: pointer;
-  transition: stroke 0.2s ease, fill-opacity 0.2s ease;
-}
-
-:global(g.cluster rect:hover) {
-  stroke: #38bdf8;
-  fill-opacity: 0.18;
 }
 </style>

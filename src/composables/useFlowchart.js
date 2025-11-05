@@ -38,14 +38,6 @@ const defaultDomainColor = '#1E293B';
 let uid = 0;
 const createId = (prefix) => `${prefix}_${Date.now().toString(36)}_${uid++}`;
 
-const escapeHtml = (value = '') =>
-  String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-
 export function useFlowchart() {
   const history = ref([]);
   const future = ref([]);
@@ -126,7 +118,7 @@ export function useFlowchart() {
     nodeIds.forEach((id) => {
       const node = state.nodes.find((item) => item.id === id);
       if (node) {
-        node.domainId = domainId ?? null;
+        node.domainId = domainId;
       }
     });
   };
@@ -161,11 +153,7 @@ export function useFlowchart() {
 
   const ensureEdge = (source, target) => {
     const exists = state.edges.some(
-      (edge) =>
-        edge.source.type === source.type &&
-        edge.source.id === source.id &&
-        edge.target.type === target.type &&
-        edge.target.id === target.id
+      (edge) => edge.source.type === source.type && edge.source.id === source.id && edge.target.type === target.type && edge.target.id === target.id
     );
     if (exists) return null;
     commit();
@@ -179,10 +167,8 @@ export function useFlowchart() {
   };
 
   const removeEdge = (edgeId) => {
-    const edgeIndex = state.edges.findIndex((edge) => edge.id === edgeId);
-    if (edgeIndex === -1) return;
     commit();
-    state.edges.splice(edgeIndex, 1);
+    state.edges = state.edges.filter((edge) => edge.id !== edgeId);
   };
 
   const mermaidDefinition = computed(() => {
@@ -197,46 +183,38 @@ export function useFlowchart() {
 
     const domainBuckets = new Map();
     state.nodes.forEach((node) => {
-      const bucketKey = node.domainId || 'root';
-      if (!domainBuckets.has(bucketKey)) {
-        domainBuckets.set(bucketKey, []);
+      if (!domainBuckets.has(node.domainId || 'root')) {
+        domainBuckets.set(node.domainId || 'root', []);
       }
-      domainBuckets.get(bucketKey).push(node);
+      domainBuckets.get(node.domainId || 'root').push(node);
     });
 
     state.domains.forEach((domain) => {
-      const safeName = escapeHtml(domain.name || '');
-      const anchorHtml = `<div class='domain-label' data-domain-id='${domain.id}'>${safeName}</div>`;
-      lines.push(`  subgraph domain_${domain.id}["域 ${safeName}"]`);
+      lines.push(`  subgraph domain_${domain.id}["域 ${domain.name}"]`);
       lines.push('    direction TB');
-      lines.push(`    domain_anchor_${domain.id}["${anchorHtml}"]:::domainAnchor`);
+      lines.push(`    domain_anchor_${domain.id}["${domain.name}"]:::domainAnchor`);
       const nodes = domainBuckets.get(domain.id) || [];
       nodes.forEach((node) => {
-        const safeLabel = escapeHtml(node.name || '');
-        const nodeHtml = `<div class='node-label' data-node-id='${node.id}'>${safeLabel}</div>`;
-        lines.push(`    node_${node.id}["${nodeHtml}"]:::${node.type}`);
+        const label = node.name.replace(/"/g, '\\"');
+        lines.push(`    node_${node.id}["${label}"]:::${node.type}`);
       });
       lines.push('  end');
     });
 
     const rootNodes = domainBuckets.get('root') || [];
     rootNodes.forEach((node) => {
-      const safeLabel = escapeHtml(node.name || '');
-      const nodeHtml = `<div class='node-label' data-node-id='${node.id}'>${safeLabel}</div>`;
-      lines.push(`  node_${node.id}["${nodeHtml}"]:::${node.type}`);
+      const label = node.name.replace(/"/g, '\\"');
+      lines.push(`  node_${node.id}["${label}"]:::${node.type}`);
     });
 
     state.edges.forEach((edge) => {
-      const sourceId =
-        edge.source.type === 'domain' ? `domain_anchor_${edge.source.id}` : `node_${edge.source.id}`;
-      const targetId =
-        edge.target.type === 'domain' ? `domain_anchor_${edge.target.id}` : `node_${edge.target.id}`;
-      const label = `<span data-edge-id='${edge.id}'></span>`;
+      const sourceId = edge.source.type === 'domain' ? `domain_anchor_${edge.source.id}` : `node_${edge.source.id}`;
+      const targetId = edge.target.type === 'domain' ? `domain_anchor_${edge.target.id}` : `node_${edge.target.id}`;
+      const label = `<span data-edge-id=\\"${edge.id}\\"></span>`;
       lines.push(`  ${sourceId} -->|${label}| ${targetId}`);
     });
 
-    return lines.join('
-');
+    return lines.join('\n');
   });
 
   const serialize = () => ({
